@@ -1,0 +1,160 @@
+name: CI Pipeline (Evolved) - nginx:alpine3.23-slim
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/intranet-newdeal
+
+jobs:
+  # Job 1 : Build avec l'image slim
+  build:
+    name: Build Docker Image (slim)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Mettre à jour Dockerfile vers nginx:alpine3.23-slim
+        run: sed -i 's|FROM nginx:alpine3.23|FROM nginx:alpine3.23-slim|' Dockerfile
+
+      - name: Connexion à Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build de l'image Docker slim
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: ${{ env.DOCKER_IMAGE }}:slim-${{ github.sha }}
+          load: true
+
+      - name: Sauvegarder l'image Docker
+        run: docker save ${{ env.DOCKER_IMAGE }}:slim-${{ github.sha }} -o image.tar
+
+      - name: Upload de l'artefact image
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-slim
+          path: image.tar
+          retention-days: 1
+
+  # Job 2 : Scan sécurité - blocage si CRITICAL
+  security-scan:
+    name: Security Scan (Block on CRITICAL)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Télécharger l'image Docker
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-slim
+
+      - name: Charger l'image Docker
+        run: docker load -i image.tar
+
+      - name: Scan des vulnérabilités avec Trivy (CRITICAL bloquant)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:slim-${{ github.sha }}
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL
+
+      - name: Scan des secrets avec Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notification email - Scan réussi
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "[CI] Scan sécurité réussi - ${{ github.repository }}"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: CI/CD Pipeline <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            Le scan de sécurité a réussi pour le commit ${{ github.sha }}.
+            Branche : ${{ github.ref_name }}
+            Auteur : ${{ github.actor }}
+            Aucune vulnérabilité CRITICAL détectée.
+
+      - name: Notification email - Vulnérabilité CRITICAL détectée
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "[ALERTE CI] Vulnérabilité CRITICAL détectée - ${{ github.repository }}"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: CI/CD Pipeline <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            ALERTE : Une vulnérabilité CRITICAL a été détectée dans l'image Docker.
+            Le pipeline a été bloqué.
+            Branche : ${{ github.ref_name }}
+            Commit : ${{ github.sha }}
+            Auteur : ${{ github.actor }}
+            Veuillez corriger les vulnérabilités avant de continuer.
+
+  # Job 3 : Push vers Docker Hub
+  push:
+    name: Push to Docker Hub (slim)
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - name: Connexion à Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Télécharger l'image Docker
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image-slim
+
+      - name: Charger l'image Docker
+        run: docker load -i image.tar
+
+      - name: Tagger l'image (slim-latest)
+        run: docker tag ${{ env.DOCKER_IMAGE }}:slim-${{ github.sha }} ${{ env.DOCKER_IMAGE }}:slim-latest
+
+      - name: Push vers Docker Hub
+        run: |
+          docker push ${{ env.DOCKER_IMAGE }}:slim-${{ github.sha }}
+          docker push ${{ env.DOCKER_IMAGE }}:slim-latest
+
+      - name: Notification email - Pipeline réussi
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "[CI] Pipeline réussi - Image poussée sur Docker Hub"
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: CI/CD Pipeline <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            Le pipeline CI s'est terminé avec succès.
+            Image poussée : ${{ env.DOCKER_IMAGE }}:slim-latest
+            Commit : ${{ github.sha }}
+            Branche : ${{ github.ref_name }}

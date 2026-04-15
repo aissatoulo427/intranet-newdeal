@@ -1,0 +1,70 @@
+name: K8s Deploy Pipeline
+
+on:
+  push:
+    branches:
+      - k8s
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/intranet-newdeal
+
+jobs:
+  # Job 1 : Scan de sécurité
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Scan des secrets avec Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull et scan Trivy
+        run: docker pull ${{ env.DOCKER_IMAGE }}:latest
+
+      - name: Scan des vulnérabilités avec Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:latest
+          format: table
+          exit-code: 1
+          severity: CRITICAL
+
+  # Job 2 : Déploiement dans Kubernetes
+  deploy-k8s:
+    name: Deploy to Kubernetes
+    runs-on: self-hosted
+    needs: security-scan
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Vérifier la connexion au cluster Kubernetes
+        run: kubectl cluster-info
+
+      - name: Mettre à jour l'image dans le Deployment
+        run: |
+          sed -i "s|YOUR_DOCKERHUB_USERNAME|${{ secrets.DOCKERHUB_USERNAME }}|g" k8s/deployment.yaml
+
+      - name: Appliquer les manifests Kubernetes
+        run: |
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+
+      - name: Attendre que le déploiement soit prêt
+        run: |
+          kubectl rollout status deployment/intranet-newdeal --timeout=120s
+
+      - name: Vérifier l'état des pods
+        run: |
+          kubectl get pods -l app=intranet-newdeal
+          kubectl get service intranet-newdeal-service
+
+      - name: Afficher l'URL d'accès
+        run: |
+          echo "Application accessible sur NodePort 30080"
+          echo "Commande port-forward : kubectl port-forward service/intranet-newdeal-service 8080:80"
+          kubectl get nodes -o wide
