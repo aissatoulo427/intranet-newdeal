@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: intranet-newdeal
-          image: YOUR_DOCKERHUB_USERNAME/intranet-newdeal:latest
+          image: aichalo/intranet-newdeal:latest
           ports:
             - containerPort: 80
           resources:
