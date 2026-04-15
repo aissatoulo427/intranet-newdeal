@@ -61,20 +61,24 @@ jobs:
         run: docker pull ${{ env.DOCKER_IMAGE }}:latest
 
       - name: Arrêter et supprimer l'ancien conteneur si existant
+        shell: powershell
         run: |
-          docker stop ${{ env.CONTAINER_NAME }} || true
-          docker rm ${{ env.CONTAINER_NAME }} || true
+          docker stop ${{ env.CONTAINER_NAME }}
+          docker rm ${{ env.CONTAINER_NAME }}
+          exit 0
 
       - name: Déployer le nouveau conteneur sur le port 80
+        shell: powershell
         run: |
-          docker run -d \
-            --name ${{ env.CONTAINER_NAME }} \
-            --restart always \
-            -p 80:80 \
+          docker run -d `
+            --name ${{ env.CONTAINER_NAME }} `
+            --restart always `
+            -p 80:80 `
             ${{ env.DOCKER_IMAGE }}:latest
 
       - name: Vérifier que le conteneur est bien démarré
+        shell: powershell
         run: |
-          sleep 5
-          docker ps | grep ${{ env.CONTAINER_NAME }}
-          echo "Déploiement réussi - Application accessible sur le port 80"
+          Start-Sleep -Seconds 5
+          docker ps | findstr ${{ env.CONTAINER_NAME }}
+          Write-Host "Déploiement réussi - Application accessible sur le port 80"
