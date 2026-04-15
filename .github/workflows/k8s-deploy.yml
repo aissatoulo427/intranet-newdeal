@@ -43,28 +43,28 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Vérifier la connexion au cluster Kubernetes
+        shell: powershell
         run: kubectl cluster-info
 
-      - name: Mettre à jour l'image dans le Deployment
-        run: |
-          sed -i "s|YOUR_DOCKERHUB_USERNAME|${{ secrets.DOCKERHUB_USERNAME }}|g" k8s/deployment.yaml
-
       - name: Appliquer les manifests Kubernetes
+        shell: powershell
         run: |
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
 
       - name: Attendre que le déploiement soit prêt
-        run: |
-          kubectl rollout status deployment/intranet-newdeal --timeout=120s
+        shell: powershell
+        run: kubectl rollout status deployment/intranet-newdeal --timeout=120s
 
       - name: Vérifier l'état des pods
+        shell: powershell
         run: |
           kubectl get pods -l app=intranet-newdeal
           kubectl get service intranet-newdeal-service
 
       - name: Afficher l'URL d'accès
+        shell: powershell
         run: |
-          echo "Application accessible sur NodePort 30080"
-          echo "Commande port-forward : kubectl port-forward service/intranet-newdeal-service 8080:80"
+          Write-Host "Application accessible sur NodePort 30080"
+          Write-Host "Commande port-forward : kubectl port-forward service/intranet-newdeal-service 8080:80"
           kubectl get nodes -o wide
