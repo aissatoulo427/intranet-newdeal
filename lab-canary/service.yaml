@@ -1,0 +1,25 @@
+# LE point cle du canary natif :
+# le selecteur ne contient QUE "app: intranet" (pas de "version").
+# => le Service route (round-robin) vers TOUS les pods v1 ET v2.
+# => la part de trafic vers v2 = proportion de pods v2 / total.
+#
+# NOTE d'acces : sur ce Docker Desktop (Kubernetes type "kind", noeud
+# desktop-control-plane), les NodePort ne sont PAS exposes sur localhost.
+# On mesure donc la repartition DEPUIS l'interieur du cluster (script
+# count-versions.ps1 -> pod busybox qui interroge le ClusterIP), la ou
+# kube-proxy load-balance reellement le trafic.
+apiVersion: v1
+kind: Service
+metadata:
+  name: intranet
+  namespace: lab-canary
+  labels:
+    app: intranet
+spec:
+  type: ClusterIP
+  selector:
+    app: intranet        # <-- volontairement SANS "version"
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
