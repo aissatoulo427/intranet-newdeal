@@ -1,0 +1,42 @@
+# Generateur de charge INTERNE au cluster.
+# Il tape directement sur le Service webapp (ClusterIP) en boucle serree,
+# ce qui evite le goulot d'etranglement du "kubectl port-forward".
+# 4 replicas x plusieurs boucles => assez de trafic pour faire monter le CPU
+# de webapp au-dessus des 50% et declencher le HPA.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: lab-hpa
+  labels:
+    app: load-generator
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+        - name: load
+          image: busybox:1.28
+          command: ["/bin/sh", "-c"]
+          # 10 boucles wget en parallele par pod
+          args:
+            - >
+              i=0;
+              while [ $i -lt 10 ]; do
+                ( while true; do wget -q -O- http://webapp.lab-hpa.svc.cluster.local >/dev/null 2>&1; done ) &
+                i=$((i+1));
+              done;
+              wait
+          resources:
+            requests:
+              cpu: 50m
+              memory: 16Mi
+            limits:
+              cpu: 200m
+              memory: 32Mi

@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: lab-hpa
+  labels:
+    app: webapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: webapp
+          image: aichalo/intranet-newdeal:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          # requests + limits sont OBLIGATOIRES : sans "requests.cpu",
+          # le HPA ne peut pas calculer le % d'utilisation CPU.
+          resources:
+            requests:
+              cpu: 20m
+              memory: 56Mi
+            limits:
+              cpu: 20m
+              memory: 56Mi

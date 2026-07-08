@@ -1,0 +1,819 @@
+\documentclass[11pt,a4paper]{report}
+
+% ------------------------------------------------------------------
+% Encodage & langue
+% ------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+
+% ------------------------------------------------------------------
+% Mise en page
+% ------------------------------------------------------------------
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+% ------------------------------------------------------------------
+% Couleurs
+% ------------------------------------------------------------------
+\definecolor{k8sblue}{RGB}{50,108,229}
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codekw}{RGB}{170,55,50}
+\definecolor{codecomment}{RGB}{100,120,100}
+\definecolor{codestr}{RGB}{60,120,60}
+
+% ------------------------------------------------------------------
+% En-tetes / pieds de page
+% ------------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small Labs Kubernetes -- HPA \& Canary}
+\rhead{\small ISI DITI4 2026}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ------------------------------------------------------------------
+% Style des titres
+% ------------------------------------------------------------------
+\titleformat{\chapter}[display]{\huge\bfseries\color{k8sblue}}{\chaptertitlename\ \thechapter}{12pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{0pt}{20pt}
+\titleformat{\section}{\Large\bfseries\color{k8sblue}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+
+% ------------------------------------------------------------------
+% Style du code
+% ------------------------------------------------------------------
+\lstdefinestyle{shell}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecomment}\itshape,
+  stringstyle=\color{codestr},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  xleftmargin=6pt,
+  framexleftmargin=6pt,
+}
+\lstdefinelanguage{yaml}{
+  keywords={apiVersion,kind,metadata,spec,name,namespace,labels,replicas,selector,matchLabels,template,containers,image,ports,resources,requests,limits,cpu,memory,strategy,type,rollingUpdate,maxSurge,maxUnavailable,minReplicas,maxReplicas,metrics,resource,target,averageUtilization,scaleTargetRef,hard,pods,ports,targetPort},
+  keywordstyle=\color{k8sblue}\bfseries,
+  comment=[l]{\#},
+  commentstyle=\color{codecomment}\itshape,
+  morestring=[b]',
+  stringstyle=\color{codestr},
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  showstringspaces=false,
+  xleftmargin=6pt,
+  framexleftmargin=6pt,
+}
+\lstset{style=shell}
+
+% Commande pour inserer une capture d'ecran (image presente)
+\newcommand{\capture}[2]{%
+  \begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.92\textwidth]{captures/#2}
+    \caption{#1}
+    \label{fig:#2}
+  \end{figure}%
+}
+% Emplacement pour une capture pas encore prise (n'insere pas d'image)
+\newcommand{\captureTODO}[2]{%
+  \begin{figure}[h!]
+    \centering
+    \fbox{\parbox[c][4cm][c]{0.85\textwidth}{\centering\itshape
+      \textcolor{gray}{[ Capture a inserer : #1 ]}\\[4pt]
+      \small\texttt{captures/#2.png}}}
+    \caption{#1}
+    \label{fig:#2}
+  \end{figure}%
+}
+
+% ==================================================================
+\begin{document}
+
+% ---------- Page de titre ----------
+\begin{titlepage}
+  \centering
+  \vspace*{2cm}
+  {\Huge\bfseries\color{k8sblue} Laboratoires Kubernetes\par}
+  \vspace{0.6cm}
+  {\Large Autoscaling (HPA) \& Canary Release\par}
+  \vspace{1cm}
+  {\large Deploiement, mise a l'echelle automatique et livraison progressive\\[4pt]
+   d'une application web sur un cluster local\par}
+  \vspace{0.4cm}
+  {\large Docker Desktop -- Prometheus / Grafana -- K6\par}
+  \vfill
+  \begin{tabular}{rl}
+    \textbf{Formation} & : ISI -- DITI4 2026 \\
+    \textbf{Module}    & : DevOps / Cloud \\
+    \textbf{Etudiant}  & : \underline{\hspace{5cm}} \\
+    \textbf{Date}      & : \today \\
+  \end{tabular}
+  \vfill
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ##################################################################
+% CHAPITRE 1
+% ##################################################################
+\chapter{Mise a l'echelle automatique (HPA)}
+
+% ==================================================================
+\section{Objectif du laboratoire}
+
+L'objectif de ce laboratoire est de mettre en place et de \textbf{demontrer la mise a
+l'echelle automatique horizontale} (\emph{Horizontal Pod Autoscaling}, HPA) d'une
+application web sur un cluster Kubernetes.
+
+\medskip
+Concretement, il s'agit de prouver que Kubernetes est capable :
+\begin{itemize}[nosep]
+  \item d'\textbf{ajouter automatiquement des copies} (pods) de l'application lorsque la
+        charge (CPU) augmente ;
+  \item de \textbf{reduire automatiquement} le nombre de pods lorsque la charge diminue.
+\end{itemize}
+
+\begin{quote}
+\textbf{Analogie.} Une boulangerie garde \emph{un} vendeur en temps normal. A l'heure de
+pointe, le patron appelle des vendeurs supplementaires ; quand la file se vide, il les
+renvoie. Le HPA joue le role de ce patron automatique, en se basant sur la consommation
+CPU des pods.
+\end{quote}
+
+% ==================================================================
+\section{Architecture et composants}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{>{\bfseries}p{3.2cm} p{10.5cm}}
+\toprule
+Composant & Role dans le laboratoire \\
+\midrule
+Deployment \texttt{webapp} & L'application a mettre a l'echelle (1 pod au depart). \\
+Service \texttt{webapp}    & Expose l'application a l'interieur du cluster (port 80). \\
+metrics-server             & Mesure la consommation CPU/memoire des pods (le << thermometre >>). Indispensable au HPA. \\
+HPA \texttt{myapp-hpa}     & Regle d'autoscaling : si CPU moyen $>$ 50\%, ajouter des pods (max 10). \\
+ResourceQuota              & Limite les ressources totales du namespace. \\
+Prometheus / Grafana       & Collecte et visualisation des metriques (courbes). \\
+K6                         & Generateur de charge : simule 1000 utilisateurs pour declencher l'autoscaling. \\
+\bottomrule
+\end{tabular}
+\caption{Composants deployes dans le namespace \texttt{lab-hpa}.}
+\end{table}
+
+% ==================================================================
+\section{Prerequis / Environnement}
+
+\begin{lstlisting}[language=bash]
+kubectl version --client   # v1.32.2
+kubectl config current-context   # docker-desktop
+helm version               # v4.1.4
+docker version             # 28.3.0
+kubectl get nodes          # desktop-control-plane   Ready
+\end{lstlisting}
+
+Le cluster utilise est celui integre a \textbf{Docker Desktop} (un noeud
+\texttt{desktop-control-plane}). Toutes les commandes sont executees depuis
+\textbf{PowerShell}.
+
+% ==================================================================
+\section{Etape 1 -- Creation du namespace}
+
+Un \emph{namespace} isole les ressources du laboratoire du reste du cluster.
+
+\begin{lstlisting}[language=bash]
+kubectl create ns lab-hpa
+\end{lstlisting}
+
+% ==================================================================
+\section{Etape 2 -- Deploiement de l'application}
+
+Le fichier \texttt{deploy-lab-hpa.yaml} decrit le deploiement de l'application
+(image \texttt{aichalo/intranet-newdeal:latest}). Les sections \texttt{requests} et
+\texttt{limits} sont \textbf{obligatoires} : sans \texttt{requests.cpu}, le HPA ne peut
+pas calculer le pourcentage d'utilisation CPU.
+
+\begin{lstlisting}[language=yaml]
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  namespace: lab-hpa
+  labels:
+    app: webapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: webapp
+    spec:
+      containers:
+        - name: webapp
+          image: aichalo/intranet-newdeal:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 20m
+              memory: 56Mi
+            limits:
+              cpu: 20m
+              memory: 56Mi
+\end{lstlisting}
+
+Le fichier \texttt{service.yaml} expose l'application (necessaire pour les tests K6) :
+
+\begin{lstlisting}[language=yaml]
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  namespace: lab-hpa
+  labels:
+    app: webapp
+spec:
+  type: ClusterIP
+  selector:
+    app: webapp
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+kubectl apply -f deploy-lab-hpa.yaml
+kubectl apply -f service.yaml
+kubectl get pods -n lab-hpa
+\end{lstlisting}
+
+% ==================================================================
+\section{Etape 3 -- Stack d'observabilite (Prometheus / Grafana / Loki)}
+
+\begin{lstlisting}[language=bash]
+kubectl create namespace observability
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+
+helm install monitoring prometheus-community/kube-prometheus-stack -n observability
+helm install loki grafana/loki-stack -n observability
+
+kubectl get pods -n observability
+\end{lstlisting}
+
+Acces a Grafana (dans un terminal dedie) :
+
+\begin{lstlisting}[language=bash]
+kubectl port-forward svc/monitoring-grafana 8085:80 -n observability
+# Mot de passe admin :
+$p = kubectl get secret monitoring-grafana -n observability -o jsonpath="{.data.admin-password}"
+[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($p))
+\end{lstlisting}
+
+Interface accessible sur \url{http://localhost:8085} (utilisateur \texttt{admin}).
+
+% ==================================================================
+\section{Etape 4 -- Installation du metrics-server}
+
+\textbf{Correction par rapport au sujet :} l'URL du depot Helm du sujet
+(\texttt{https://github.io}) est erronee. La bonne URL est
+\texttt{https://kubernetes-sigs.github.io/metrics-server/}. Le drapeau
+\texttt{-{}-kubelet-insecure-tls} est necessaire sur Docker Desktop.
+
+\begin{lstlisting}[language=bash]
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
+helm repo update
+helm install metrics-server metrics-server/metrics-server -n kube-system \
+  --set "args={--kubelet-insecure-tls}"
+
+# Verification
+kubectl get pods -n kube-system -l app.kubernetes.io/name=metrics-server
+kubectl top nodes
+kubectl top pods -n lab-hpa
+\end{lstlisting}
+
+% ==================================================================
+\section{Etape 5 -- ResourceQuota}
+
+\begin{lstlisting}[language=yaml]
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: app-quota
+  namespace: lab-hpa
+spec:
+  hard:
+    pods: "50"
+    requests.cpu: "500m"
+    requests.memory: "1Gi"
+    limits.cpu: "2000m"
+    limits.memory: "2Gi"
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+kubectl apply -f quota-app.yaml
+kubectl get resourcequota -n lab-hpa
+\end{lstlisting}
+
+% ==================================================================
+\section{Etape 6 -- Deploiement du HPA}
+
+\textbf{Correction par rapport au sujet :} ajout de \texttt{namespace: lab-hpa} (absent du
+sujet), sinon le HPA cible le namespace \texttt{default}.
+
+\begin{lstlisting}[language=yaml]
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: myapp-hpa
+  namespace: lab-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webapp
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 50
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+kubectl apply -f hpa.yaml
+kubectl get hpa -n lab-hpa
+\end{lstlisting}
+
+Au repos, le HPA affiche les cibles avec des pourcentages et 1 replica :
+
+\begin{lstlisting}[language=bash]
+NAME        REFERENCE           TARGETS                        MINPODS  MAXPODS  REPLICAS
+myapp-hpa   Deployment/webapp   cpu: 0%/50%, memory: 17%/50%   1        10       1
+\end{lstlisting}
+
+\capture{HPA au repos (\texttt{cpu: 0\%/50\%}, REPLICAS 1) puis, apres lancement de la charge, \texttt{cpu: 99\%/50\%} et REPLICAS 10}{04-hpa-repos}
+
+% ==================================================================
+\section{Etape 7 -- Test de charge avec K6}
+
+On expose d'abord l'application sur le port 8087 (terminal dedie) :
+
+\begin{lstlisting}[language=bash]
+kubectl port-forward svc/webapp 8087:80 -n lab-hpa
+\end{lstlisting}
+
+\subsection{Scenario 1 -- charge constante}
+
+\begin{lstlisting}[language=bash]
+# script.js : 1000 utilisateurs virtuels pendant 6 minutes
+docker run --rm -i grafana/k6 run - < script.js
+\end{lstlisting}
+
+\subsection{Scenario 2 -- montee/descente progressive}
+
+\begin{lstlisting}[language=bash]
+# ramp-up-down.js : 1000 -> 500 -> 250 -> 0 utilisateurs
+docker run --rm -i grafana/k6 run - < ramp-up-down.js
+\end{lstlisting}
+
+\subsection{Scenario retenu -- generateur de charge interne au cluster}
+
+\textbf{Constat.} Lancer K6 depuis l'exterieur via \texttt{kubectl port-forward} n'a pas
+suffi a faire monter le CPU : le \texttt{port-forward} constitue un goulot d'etranglement
+(flux limite) et l'application (nginx statique) consomme tres peu de CPU. Les requetes
+n'atteignaient donc pas les pods en quantite suffisante.
+
+\medskip
+\textbf{Solution.} Generer la charge \emph{depuis l'interieur} du cluster, directement sur
+le Service \texttt{webapp} (ClusterIP), avec un deploiement dedie de 4 pods executant
+chacun 10 boucles \texttt{wget} en parallele. Comme le \texttt{ResourceQuota} impose que
+tout pod declare ses \texttt{requests}/\texttt{limits}, ceux-ci sont inclus.
+
+\begin{lstlisting}[language=yaml]
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: lab-hpa
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: load-generator
+  template:
+    metadata:
+      labels:
+        app: load-generator
+    spec:
+      containers:
+        - name: load
+          image: busybox:1.28
+          command: ["/bin/sh", "-c"]
+          args:
+            - >
+              i=0; while [ $i -lt 10 ]; do
+                ( while true; do wget -q -O- http://webapp.lab-hpa.svc.cluster.local >/dev/null 2>&1; done ) &
+                i=$((i+1)); done; wait
+          resources:
+            requests: { cpu: 50m, memory: 16Mi }
+            limits:   { cpu: 200m, memory: 32Mi }
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+kubectl apply -f load-generator.yaml     # demarre la charge
+kubectl delete -f load-generator.yaml    # arrete la charge (declenche le scale-down)
+\end{lstlisting}
+
+Pendant les tests, on observe la mise a l'echelle :
+
+\begin{lstlisting}[language=bash]
+kubectl get pods -n lab-hpa -w
+kubectl get hpa -n lab-hpa
+\end{lstlisting}
+
+\capture{Montee en charge (terminal) : \texttt{cpu: 99\%/50\%}, REPLICAS 10 et 10 pods \texttt{webapp} crees automatiquement}{05-scaling-up}
+\capture{Montee en charge (Grafana) : CPU Utilisation 246\% (from requests), courbe CPU au plafond du quota}{06-grafana-scaling}
+\capture{Retour au calme (terminal) : le HPA supprime progressivement les pods jusqu'a 1 seul \texttt{webapp}}{07-scaling-down}
+\capture{Retour au calme (Grafana) : CPU Utilisation retombee a 0\% apres l'arret de la charge}{08-grafana-down}
+
+% ==================================================================
+\section{Observations et resultats}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{p{4.5cm} p{4cm} p{4cm}}
+\toprule
+\textbf{Phase} & \textbf{CPU (cible 50\%)} & \textbf{Nombre de pods webapp} \\
+\midrule
+Repos (avant charge)        & 0\%            & 1 \\
+Montee en charge            & $>$ 50\%       & 1 $\rightarrow$ 10 \\
+Pic de charge               & 99\%           & 10 (maximum atteint) \\
+Apres arret de la charge    & retombe a 0\%  & 10 $\rightarrow$ 1 \\
+\bottomrule
+\end{tabular}
+\caption{Evolution mesuree du nombre de pods en fonction de la charge CPU.}
+\end{table}
+
+\noindent Sortie du HPA au pic de charge (\texttt{kubectl get hpa -n lab-hpa}) :
+
+\begin{lstlisting}[language=bash]
+NAME        REFERENCE           TARGETS                         MINPODS  MAXPODS  REPLICAS
+myapp-hpa   Deployment/webapp   cpu: 99%/50%, memory: 18%/50%   1        10       10
+\end{lstlisting}
+
+\noindent Lecture Grafana au pic (namespace \texttt{lab-hpa}) :
+\begin{itemize}[nosep]
+  \item CPU Utilisation (from requests) : \textbf{246\%}
+  \item CPU Utilisation (from limits)   : 98,2\%
+  \item Memory Utilisation (from requests) : 16,9\%
+\end{itemize}
+
+\textbf{Conclusion.} Le laboratoire demontre que le HPA, couple au metrics-server,
+ajuste automatiquement le nombre de pods de l'application en fonction de la charge CPU.
+Sous l'effet du generateur de charge, le CPU moyen des pods \texttt{webapp} est passe de
+0\% a 99\% (cible : 50\%), ce qui a declenche la creation automatique de pods
+supplementaires jusqu'a la limite fixee (\texttt{maxReplicas: 10}). Apres l'arret de la
+charge, le CPU est retombe et le HPA a ramene le deploiement a 1 pod (apres la fenetre de
+stabilisation de 5 minutes), confirmant le fonctionnement complet de la mise a l'echelle
+automatique (montee \emph{et} descente).
+
+% ==================================================================
+\section{Nettoyage}
+
+\begin{lstlisting}[language=bash]
+helm uninstall monitoring -n observability
+helm uninstall loki -n observability
+kubectl delete namespace observability
+kubectl delete namespace lab-hpa
+helm uninstall metrics-server -n kube-system
+\end{lstlisting}
+
+% ==================================================================
+\section{Difficultes rencontrees et solutions}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{p{5.2cm} p{8.3cm}}
+\toprule
+\textbf{Probleme} & \textbf{Cause et solution} \\
+\midrule
+Le CPU ne monte pas malgre le test K6, le HPA reste a 1 replica. &
+K6 lance depuis l'exterieur via \texttt{kubectl port-forward} est bride (un seul flux) et
+l'application nginx est tres legere. Solution : generer la charge \emph{depuis l'interieur}
+du cluster (deploiement \texttt{load-generator} tapant sur le Service ClusterIP). \\
+\addlinespace
+\texttt{base64 : n'est pas reconnu} lors du decodage du mot de passe Grafana. &
+La commande \texttt{base64} n'existe pas sous Windows. Solution : decoder en PowerShell avec
+\texttt{[System.Convert]::FromBase64String(\$p)}. \\
+\addlinespace
+\texttt{kubectl get hpa,pods -w} : \texttt{you may only specify a single resource type}. &
+Le mode \emph{watch} (\texttt{-w}) n'accepte qu'un seul type de ressource. Solution :
+surveiller les pods et le HPA dans deux commandes distinctes. \\
+\addlinespace
+\texttt{kubectl top nodes} : \texttt{Metrics API not available}. &
+Le metrics-server venait de demarrer et n'etait pas encore \texttt{Ready}. Solution :
+attendre $\sim$1 min que son pod soit \texttt{1/1 Running}, puis relancer. \\
+\addlinespace
+Installation du metrics-server impossible (depot Helm introuvable). &
+L'URL du sujet (\texttt{https://github.io}) est erronee. Solution : utiliser
+\texttt{https://kubernetes-sigs.github.io/metrics-server/} et ajouter l'argument
+\texttt{-{}-kubelet-insecure-tls} (obligatoire sur Docker Desktop). \\
+\bottomrule
+\end{tabular}
+\caption{Journal des difficultes rencontrees et de leurs solutions (chapitre HPA).}
+\end{table}
+
+\section*{Annexe -- Corrections apportees au sujet}
+\addcontentsline{toc}{section}{Annexe -- Corrections apportees au sujet}
+
+\begin{enumerate}[nosep]
+  \item Manifeste \texttt{Deployment} reformate proprement (le YAML \texttt{items:} du sujet
+        etait mal indente) et utilisation de l'image du projet \texttt{aichalo/intranet-newdeal}.
+  \item Ajout d'un \texttt{Service} \texttt{webapp} (absent du sujet mais requis pour le
+        port-forward vers le port 8087 utilise par K6).
+  \item metrics-server : URL du depot corrigee en
+        \texttt{https://kubernetes-sigs.github.io/metrics-server/} et ajout de
+        \texttt{-{}-kubelet-insecure-tls}.
+  \item Loki : \texttt{port-forward} sur \texttt{-n observability} (au lieu de
+        \texttt{-n monitoring}).
+  \item HPA : ajout de \texttt{namespace: lab-hpa}.
+\end{enumerate}
+
+% ##################################################################
+% CHAPITRE 2
+% ##################################################################
+\chapter{Canary Release}
+
+\section{Objectif}
+
+Le \emph{Canary Release} (livraison << canari >>) consiste a deployer une nouvelle version
+d'une application (v2) a cote de la version en production (v1), en n'envoyant d'abord
+qu'une \textbf{petite part du trafic} vers v2. Si la v2 se comporte correctement, on
+augmente progressivement sa part (20\%, 50\%, 100\%) ; en cas de probleme, on revient a
+v1 sans impact notable pour les utilisateurs.
+
+\begin{quote}
+\textbf{Analogie.} On envoie un << canari dans la mine >> : une petite fraction des
+utilisateurs teste la nouvelle version. Si tout va bien, on generalise ; sinon, on fait
+marche arriere.
+\end{quote}
+
+\section{Methode retenue : Kubernetes natif}
+
+Aucun outil supplementaire (ni Istio, ni Argo Rollouts). Le principe repose sur un
+\textbf{unique Service} dont le selecteur est volontairement << large >> (\texttt{app:
+intranet}) et qui cible donc \textbf{deux Deployments} partageant ce label mais
+differencies par \texttt{version: v1} / \texttt{version: v2}.
+
+\begin{quote}
+Le Service repartit le trafic (round-robin) sur tous les pods correspondants. Par
+consequent : \textbf{la part de trafic vers v2 = proportion de pods v2 sur le total}.
+\end{quote}
+
+\section{Preparation de la version v2}
+
+La v2 est identique a la v1, a l'exception d'un bandeau visible << VERSION 2 >> ajoute dans
+\texttt{index.html} (marqueur permettant de distinguer v1 et v2 a l'oeil et au \texttt{grep}).
+L'image v2 repart de la v1 et ne remplace que ce fichier :
+
+\begin{lstlisting}[language=bash]
+# lab-canary/v2/Dockerfile
+FROM aichalo/intranet-newdeal:latest
+COPY index.html /usr/share/nginx/html/index.html
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+cd lab-canary/v2
+docker build -t aichalo/intranet-newdeal:2.0 .
+docker push aichalo/intranet-newdeal:2.0
+\end{lstlisting}
+
+\capture{Site en version v1 (bandeau normal)}{c2-01-browser-v1}
+\capture{Site en version v2 (bandeau rouge << VERSION 2 >>, titre suivi de (v2))}{c2-02-browser-v2}
+
+\section{Manifests}
+
+Deux Deployments et un Service. Extrait des labels (le reste : image, ports, ressources,
+readinessProbe) :
+
+\begin{lstlisting}[language=yaml]
+# deploy-v1.yaml (extrait)      # deploy-v2.yaml (extrait)
+metadata:                       metadata:
+  name: intranet-v1              name: intranet-v2
+spec:                           spec:
+  replicas: 4                    replicas: 0     # aucun trafic v2 au depart
+  template:                      template:
+    metadata:                      metadata:
+      labels:                        labels:
+        app: intranet                app: intranet   # label COMMUN
+        version: v1                  version: v2
+    ... image: :latest            ... image: :2.0
+\end{lstlisting}
+
+\begin{lstlisting}[language=yaml]
+# service.yaml -- LE point cle : selecteur SANS "version"
+apiVersion: v1
+kind: Service
+metadata:
+  name: intranet
+  namespace: lab-canary
+spec:
+  selector:
+    app: intranet        # cible v1 ET v2
+  ports:
+    - port: 80
+      targetPort: 80
+\end{lstlisting}
+
+\begin{lstlisting}[language=bash]
+kubectl create ns lab-canary
+kubectl apply -f deploy-v1.yaml
+kubectl apply -f deploy-v2.yaml
+kubectl apply -f service.yaml
+kubectl get pods -n lab-canary
+\end{lstlisting}
+
+\capture{Etat initial : 4 pods \texttt{intranet-v1} Running (100\% v1, 0 pod v2)}{c2-06-pods-init}
+
+\section{Methode de mesure de la repartition}
+
+\textbf{Point technique important.} Le Kubernetes integre a Docker Desktop (noeud
+\texttt{desktop-control-plane}, base sur \emph{kind}) \textbf{n'expose pas les Services
+NodePort sur \texttt{localhost}} ; de plus, \texttt{kubectl port-forward} se connecte a
+\emph{un seul} pod et ne repartit donc pas le trafic. Ces deux methodes ne permettent pas
+d'observer le partage v1/v2.
+
+\medskip
+La repartition n'est reelle que pour le trafic \textbf{interne au cluster}, ou kube-proxy
+load-balance le Service (ClusterIP) entre tous les endpoints. On mesure donc depuis
+l'interieur du cluster : un pod \texttt{busybox} interroge $N$ fois le Service via son nom
+DNS interne et compte les reponses de la v2 (reperees par l'identifiant \texttt{canary-banner},
+present uniquement dans son \texttt{index.html}). C'est le role du script
+\texttt{count-versions.ps1} :
+
+\begin{lstlisting}[language=bash]
+kubectl run canary-count --rm -i --restart=Never -n lab-canary \
+  --image=busybox:1.28 --command -- sh -c \
+  'n=50; v2=0; i=0; while [ $i -lt $n ]; do \
+     wget -q -O - http://intranet.lab-canary.svc.cluster.local \
+       | grep -q canary-banner && v2=$((v2+1)); \
+     i=$((i+1)); done; echo RESULT v1=$((n-v2)) v2=$v2'
+\end{lstlisting}
+
+\section{Deroule de la progression}
+
+Pour chaque palier, on ajuste le nombre de replicas, on attend que les pods soient
+\texttt{Running}, puis on lance \texttt{count-versions.ps1}.
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{p{2.5cm} p{7.5cm} p{2.5cm}}
+\toprule
+\textbf{Palier} & \textbf{Commande} & \textbf{\% trafic v2} \\
+\midrule
+Initial   & v1=4, v2=0 (etat de depart) & 0\% \\
+Canary    & \texttt{kubectl scale deploy/intranet-v2 --replicas=1} & $\approx$20\% \\
+Equilibre & \texttt{scale intranet-v1 --replicas=2} et \texttt{intranet-v2 --replicas=2} & 50\% \\
+Bascule   & \texttt{scale intranet-v1 --replicas=0} et \texttt{intranet-v2 --replicas=4} & 100\% \\
+\bottomrule
+\end{tabular}
+\caption{Progression du canary pilotee par le nombre de pods.}
+\end{table}
+
+\begin{lstlisting}[language=bash]
+# Exemple : passer au canary 20%
+kubectl scale deploy/intranet-v2 -n lab-canary --replicas=1
+.\count-versions.ps1
+\end{lstlisting}
+
+\capture{Palier canary 20\% : 4 pods v1 + 1 pod v2, comptage \texttt{v1=37 v2=13}}{c2-03-count-20}
+\capture{Palier 50/50 : 2 pods v1 + 2 pods v2, comptage \texttt{v1=27 v2=23}}{c2-04-count-50}
+\capture{Palier 100\% v2 : 4 pods v2, comptage \texttt{v1=0 v2=50}}{c2-05-count-100}
+
+\section{Rollback (securite du canary)}
+
+L'un des interets majeurs du canary est de pouvoir \textbf{annuler instantanement} en cas
+de probleme sur v2, en ramenant tout le trafic vers v1 :
+
+\begin{lstlisting}[language=bash]
+kubectl scale deploy/intranet-v1 -n lab-canary --replicas=4
+kubectl scale deploy/intranet-v2 -n lab-canary --replicas=0
+\end{lstlisting}
+
+\section{Difficultes rencontrees et solutions}
+
+Le tableau ci-dessous recense les problemes reels rencontres pendant la realisation du
+laboratoire et la maniere dont ils ont ete resolus.
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{p{5.2cm} p{8.3cm}}
+\toprule
+\textbf{Probleme} & \textbf{Cause et solution} \\
+\midrule
+Le site est inaccessible sur \texttt{localhost:30090} (\texttt{curl} renvoie HTTP 000). &
+Docker Desktop (Kubernetes type \emph{kind}) n'expose pas les NodePort sur l'hote. Solution :
+mesurer la repartition depuis l'interieur du cluster (Service ClusterIP + kube-proxy). \\
+\addlinespace
+Le comptage donne toujours 100\% v1, quel que soit le nombre de pods v2. &
+\texttt{kubectl port-forward svc/...} se connecte a un \emph{seul} pod et ne repartit pas le
+trafic. Solution : interroger le Service via son DNS interne depuis un pod \texttt{busybox}. \\
+\addlinespace
+Le script de comptage plante : \texttt{syntax error: unexpected end of file (expecting "then")}. &
+Le marqueur recherche \texttt{"VERSION 2"} contient un espace ; les guillemets etaient mal
+echappes lors du passage PowerShell $\rightarrow$ kubectl $\rightarrow$ shell. Solution :
+chercher un marqueur sans espace ni guillemet (\texttt{canary-banner}) et passer le script
+shell en quotes simples cote PowerShell. \\
+\addlinespace
+Requetes \texttt{wget: can't connect} pendant un comptage. &
+Le comptage a ete lance alors que les pods etaient encore en \texttt{ContainerCreating} /
+\texttt{Terminating}. Solution : attendre que tous les pods soient \texttt{1/1 Running}
+avant de mesurer. \\
+\addlinespace
+\texttt{.\textbackslash count-versions.ps1 : n'est pas reconnu}. &
+La commande a ete lancee hors du dossier \texttt{lab-canary}. Solution : se placer dans le
+dossier (\texttt{cd}) avant d'executer le script. \\
+\bottomrule
+\end{tabular}
+\caption{Journal des difficultes rencontrees et de leurs solutions.}
+\end{table}
+
+\section{Resultats et conclusion}
+
+\begin{table}[h!]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{p{2.6cm} p{3cm} p{3.2cm} p{3cm}}
+\toprule
+\textbf{Palier} & \textbf{Ratio pods (v1/v2)} & \textbf{Comptage (sur 50)} & \textbf{Trafic v2 mesure} \\
+\midrule
+Initial   & 4 / 0 & v1=50, v2=0  & 0\% \\
+Canary    & 4 / 1 & v1=37, v2=13 & 26\% \\
+Equilibre & 2 / 2 & v1=27, v2=23 & 46\% \\
+Bascule   & 0 / 4 & v1=0,  v2=50 & 100\% \\
+\bottomrule
+\end{tabular}
+\caption{Repartition mesuree du trafic a chaque palier (comptage in-cluster sur 50 requetes).}
+\end{table}
+
+\noindent Les proportions mesurees (0\%, 26\%, 46\%, 100\%) correspondent bien aux ratios
+de pods configures (0/5, 1/5, 2/4, 4/4). Les legers ecarts (26\% au lieu de 20\%, 46\% au
+lieu de 50\%) proviennent de la variabilite normale du round-robin sur un faible nombre de
+requetes.
+
+\textbf{Conclusion.} Le laboratoire demontre une strategie de \emph{Canary Release} en
+Kubernetes natif : grace a un Service ciblant un label commun a deux Deployments, la part
+de trafic dirigee vers la nouvelle version est controlee par le nombre de pods. La montee
+en charge progressive (0\% $\rightarrow$ 20\% $\rightarrow$ 50\% $\rightarrow$ 100\%) et la
+possibilite de \emph{rollback} immediat illustrent l'interet du canary pour livrer une
+nouvelle version en limitant le risque.
+
+\end{document}

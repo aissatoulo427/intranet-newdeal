@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: app-quota
+  namespace: lab-hpa
+spec:
+  hard:
+    pods: "50"              # Nombre max de Pods dans le namespace
+    requests.cpu: "500m"    # Somme des CPU demandes (10 pods x 20m = 200m < 500m OK)
+    requests.memory: "1Gi"  # Somme de la memoire demandee
+    limits.cpu: "2000m"     # Limite CPU cumulee (2 coeurs)
+    limits.memory: "2Gi"    # Limite memoire cumulee
